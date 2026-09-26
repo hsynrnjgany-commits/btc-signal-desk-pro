@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BTC Signal Desk PRO</title>
+<style>
+ body{font-family:system-ui;background:#0d1117;color:#e6edf3;margin:0;padding:12px}
+ h1{font-size:18px}
+ h2{color:#58a6ff;border-bottom:1px solid #30363d;padding-bottom:6px;font-size:14px;margin-top:0}
+ .grid{display:grid;grid-template-columns:1fr;gap:12px}
+ .card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px}
+ .row{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dashed #21262d;font-size:13px}
+ .BUY{color:#3fb950}.SELL{color:#f85149}.HOLD{color:#d29922}
+ button{background:#238636;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;margin:2px}
+ input{background:#0d1117;color:#e6edf3;border:1px solid #30363d;padding:4px;border-radius:4px;width:80px}
+</style></head>
+<body>
+<h1>BTC Signal Desk PRO</h1>
+<div class="grid">
+  <div class="card"><h2>LIVE MARKET</h2><div id="market">...</div></div>
+  <div class="card"><h2>SIGNAL (last closed 1H)</h2><div id="signal">...</div></div>
+  <div class="card"><h2>INDICATORS</h2><div id="ind">...</div></div>
+  <div class="card"><h2>PAPER ACCOUNT</h2><div id="paper">...</div>
+    <div style="margin-top:8px">
+      <button onclick="resetPaper()">Reset</button>
+      <button onclick="runBacktest()">Run Backtest</button>
+    </div>
+    <div id="bt" style="margin-top:8px;font-size:12px"></div>
+  </div>
+  <div class="card"><h2>LEVERAGE</h2>
+    <div class="row"><span>Auto Leverage</span>
+      <label><input type="checkbox" id="useLev" onchange="setLev()"> Enabled</label>
+    </div>
+    <div class="row"><span>Max Leverage</span>
+      <input id="maxLev" type="number" min="1" max="200" value="20" onchange="setLev()">
+    </div>
+    <div id="levPrev" style="margin-top:8px;font-size:11px;color:#8b949e"></div>
+  </div>
+  <div class="card"><h2>OPEN POSITION</h2><div id="pos">...</div></div>
+  <div class="card"><h2>TRADE HISTORY</h2><div id="trades">...</div></div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const f=(n,d=2)=>Number(n).toFixed(d);
+
+async function tick(){
+  try{
+    const m=await (await fetch('/api/market')).json();
+    if(m.error){
+      $('market').innerHTML=`<span class="SELL">X ${m.error}</span>`;
+    } else {
+      $('market').innerHTML=`
+        <div class="row"><span>Symbol</span><b>${m.symbol}</b></div>
+        <div class="row"><span>Current Price</span><b>${f(m.price)}</b></div>
+        <div class="row"><span>Candles</span><b>${m.candles_count}</b></div>
+        <div class="row"><span>Last Closed</span><b>${new Date(m.last_closed_ts).toLocaleString()}</b></div>
+        <div class="row"><span>Connected</span><b>${m.connected?'YES':'NO'}</b></div>`;
+    }
+  }catch(e){$('market').innerHTML=`<span class="SELL">X ${e}</span>`;}
+
+  try{
+    const s=await (await fetch('/api/signal')).json();
+    if(s.error){$('signal').innerHTML=`<span class="SELL">X ${s.error}</span>`;}
+    else{
+      const g=s.signal;
+      $('signal').innerHTML=`
+        <div class="row"><span>Signal</span><b class="${g.signal}">${g.signal}</b></div>
+        <div class="row"><span>Score</span><b>${g.score}</b></div>
+        <div class="row"><span>Trend</span><b>${g.trend}</b></div>
+        <div class="row"><span>Momentum</span><b>${g.momentum}</b></div>
+        <div class="row"><span>Volume</span><b>${g.volume_state}</b></div>
+        <div class="row"><span>Based on</span><b>${s.signal_on}</b></div>`;
+      $('ind').innerHTML=`
+        <div class="row"><span>MA10 / MA20</span><b>${f(g.ma10)} / ${f(g.ma20)}</b></div>
+        <div class="row"><span>MA40 / MA50</span><b>${f(g.ma40)} / ${f(g.ma50)}</b></div>
+        <div class="row"><span>RSI</span><b>${f(g.rsi)}</b></div>
+        <div class="row"><span>MACD / Sig</span><b>${f(g.macd,4)} / ${f(g.macd_signal,4)}</b></div>
+        <div class="row"><span>MACD Hist</span><b>${f(g.macd_hist,4)}</b></div>
+        <div class="row"><span>ATR</span><b>${f(g.atr)}</b></div>
+        <div class="row"><span>Vol Ratio</span><b>${f(g.vol_ratio)}</b></div>`;
+    }
+  }catch(e){}
+
+  try{
+    const p=await (await fetch('/api/paper')).json();
+    if(!p.error){
+      $('paper').innerHTML=`
+        <div class="row"><span>Balance</span><b>${f(p.balance)}</b></div>
+        <div class="row"><span>Equity</span><b>${f(p.equity)}</b></div>
+        <div class="row"><span>Unrealized P/L</span><b>${f(p.unrealized_pnl)}</b></div>
+        <div class="row"><span>Realized P/L</span><b>${f(p.realized_pnl)}</b></div>
+        <div class="row"><span>Trades</span><b>${p.total_trades}</b></div>
+        <div class="row"><span>Win Rate</span><b>${f(p.win_rate)}%</b></div>
+        <div class="row"><span>Profit Factor</span><b>${f(p.profit_factor)}</b></div>
+        <div class="row"><span>Max Drawdown</span><b>${f(p.max_drawdown)}%</b></div>`;
+      if (document.activeElement !== $('maxLev')) {
+        $('maxLev').value = p.max_leverage;
+      }
+      $('useLev').checked = p.use_auto_leverage;
+    }
+  }catch(e){}
+
+  try{
+    const r=await (await fetch('/api/paper/position')).json();
+    const p=r.position;
+    $('pos').innerHTML = p ? `
+      <div class="row"><span>Side</span><b class="${p.side==='LONG'?'BUY':'SELL'}">${p.side}</b></div>
+      <div class="row"><span>Entry</span><b>${f(p.entry_price)}</b></div>
+      <div class="row"><span>Size</span><b>${f(p.size,6)}</b></div>
+      <div class="row"><span>Stop</span><b>${f(p.stop_loss)}</b></div>
+      <div class="row"><span>TP</span><b>${f(p.take_profit)}</b></div>
+      <div class="row"><span>Leverage</span><b>${f(p.leverage,1)}x</b></div>
+      <div class="row"><span>Margin</span><b>${f(p.margin)}</b></div>
+      <div class="row"><span>Liquidation</span><b class="SELL">${f(p.liquidation)}</b></div>
+      <div class="row"><span>Trailing</span><b>${p.trailing_active}</b></div>`
+      : 'No open position';
+  }catch(e){}
+
+  try{
+    const t=await (await fetch('/api/paper/trades')).json();
+    $('trades').innerHTML = t.trades.slice().reverse().slice(0,20).map(x=>`
+      <div class="row">
+        <span>${x.side} ${x.reason}</span>
+        <b class="${x.pnl>=0?'BUY':'SELL'}">${f(x.pnl)}</b>
+      </div>`).join('') || 'No trades yet';
+  }catch(e){}
+
+  try{
+    const r = await (await fetch('/api/leverage/preview')).json();
+    if (!r.error) {
+      $('levPrev').innerHTML =
+        `Preview: <b>${r.leverage}x</b> (sig ${r.signal_mult} x vol ${r.vol_mult} x trend ${r.trend_mult} x dd ${r.dd_mult} x loss ${r.loss_mult})<br>ATR% = ${r.atr_pct}`;
+    }
+  }catch(e){}
+}
+
+async function resetPaper(){
+  if(!confirm('Reset paper account?'))return;
+  await fetch('/api/paper/reset',{method:'POST'});
+  tick();
+}
+
+async function runBacktest(){
+  $('bt').innerHTML='Running...';
+  const r=await (await fetch('/api/backtest')).json();
+  if(r.error){$('bt').innerHTML=`X ${r.error}`;return;}
+  $('bt').innerHTML=`<b>Backtest:</b><br>
+    Trades ${r.total_trades} | WR ${f(r.win_rate)}% |
+    PF ${f(r.profit_factor)} | DD ${f(r.max_drawdown)}% |
+    PnL ${f(r.realized_pnl)}`;
+}
+
+async function setLev(){
+  await fetch('/api/paper/leverage',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      max_leverage: parseFloat($('maxLev').value),
+      use_auto_leverage: $('useLev').checked
+    })
+  });
+}
+
+tick();
+setInterval(tick, 30000);
+</script>
+</body></html>
